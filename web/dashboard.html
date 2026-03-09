@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duplistream</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.connected { background: #00c853; box-shadow: 0 0 10px #00c853; }
+        .status-dot.disconnected { background: #ff5252; }
+        .status-dot.degraded { background: #ffc107; box-shadow: 0 0 10px #ffc107; }
+
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .card-title { font-size: 1.1rem; font-weight: 600; }
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .badge.live { background: #00c853; color: #000; }
+        .badge.offline { background: #424242; }
+        .badge.reconnecting { background: #ffc107; color: #000; }
+        .badge.audio { background: #7c4dff; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+        }
+        .stat {
+            background: #0f0f23;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value { font-size: 1.3rem; font-weight: 600; color: #fff; }
+        .stat-label { font-size: 0.75rem; color: #888; margin-top: 4px; }
+
+        .input-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #0f0f23;
+            border-radius: 8px;
+        }
+        .input-status .info { flex: 1; }
+        .input-status .label { color: #888; font-size: 0.85rem; }
+        .input-status .value { font-size: 1.1rem; margin-top: 4px; }
+
+        .outputs-list { display: flex; flex-direction: column; gap: 12px; }
+
+        .output-card {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 4px solid #424242;
+        }
+        .output-card.running { border-left-color: #00c853; }
+        .output-card.error { border-left-color: #ff5252; }
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .output-name { font-weight: 600; text-transform: capitalize; }
+        .output-error { color: #ff5252; font-size: 0.85rem; margin-top: 8px; }
+        .output-stats {
+            display: flex;
+            gap: 16px;
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .output-stats span { display: flex; align-items: center; gap: 4px; }
+
+        .footer {
+            text-align: center;
+            color: #555;
+            font-size: 0.8rem;
+            margin-top: 20px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .reconnecting .status-dot { animation: pulse 1s infinite; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>
+            <span class="status-dot" id="main-status"></span>
+            Duplistream
+        </h1>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Input Stream</span>
+                <span class="badge" id="input-badge">Offline</span>
+            </div>
+            <div class="input-status">
+                <div class="info">
+                    <div class="label">Uptime</div>
+                    <div class="value" id="uptime">--:--:--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Outputs</span>
+            </div>
+            <div class="outputs-list" id="outputs">
+                <div class="output-card">Loading...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Auto-refreshes every 2 seconds
+        </div>
+    </div>
+
+    <script>
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '--:--:--';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            while (bytes >= 1024 && i < units.length - 1) {
+                bytes /= 1024;
+                i++;
+            }
+            return bytes.toFixed(1) + ' ' + units[i];
+        }
+
+        async function updateStatus() {
+            try {
+                const res = await fetch('/status');
+                const data = await res.json();
+
+                // Main status dot
+                const mainDot = document.getElementById('main-status');
+                const inputBadge = document.getElementById('input-badge');
+
+                if (data.input_connected) {
+                    mainDot.className = 'status-dot connected';
+                    inputBadge.className = 'badge live';
+                    inputBadge.textContent = 'Live';
+                } else {
+                    mainDot.className = 'status-dot disconnected';
+                    inputBadge.className = 'badge offline';
+                    inputBadge.textContent = 'Waiting';
+                }
+
+                // Check if any outputs are degraded
+                const outputs = data.outputs || {};
+                const hasError = Object.values(outputs).some(o => o.error && !o.running);
+                if (data.input_connected && hasError) {
+                    mainDot.className = 'status-dot degraded';
+                }
+
+                // Uptime
+                document.getElementById('uptime').textContent =
+                    data.uptime ? data.uptime : '--:--:--';
+
+                // Outputs
+                const outputsEl = document.getElementById('outputs');
+                if (Object.keys(outputs).length === 0) {
+                    outputsEl.innerHTML = '<div class="output-card">No outputs configured</div>';
+                } else {
+                    outputsEl.innerHTML = Object.entries(outputs).map(([name, o]) => {
+                        const statusClass = o.running ? 'running' : (o.error ? 'error' : '');
+                        const badge = o.running ? '<span class="badge live">Live</span>' :
+                            (o.reconnects > 0 ? `<span class="badge reconnecting">Reconnecting (${o.reconnects})</span>` :
+                            '<span class="badge offline">Offline</span>');
+                        const audioBadge = o.audio_only ? '<span class="badge audio">Audio</span>' : '';
+
+                        const stats = o.stats || {};
+                        const statsHtml = o.running ? `
+                            <div class="output-stats">
+                                <span>Frames: ${stats.frames || 0}</span>
+                                <span>Bitrate: ${stats.bitrate || 'N/A'}</span>
+                                <span>Duration: ${stats.duration || '--:--:--'}</span>
+                                <span>Sent: ${formatBytes(stats.size_bytes)}</span>
+                            </div>
+                        ` : '';
+
+                        const errorHtml = o.error ? `<div class="output-error">${o.error}</div>` : '';
+
+                        return `
+                            <div class="output-card ${statusClass}">
+                                <div class="output-header">
+                                    <span class="output-name">${name}</span>
+                                    <div>${audioBadge} ${badge}</div>
+                                </div>
+                                ${statsHtml}
+                                ${errorHtml}
+                            </div>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                console.error('Failed to fetch status:', err);
+            }
+        }
+
+        updateStatus();
+        setInterval(updateStatus, 2000);
+    </script>
+</body>
+</html>

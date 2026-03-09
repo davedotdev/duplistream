@@ -1,0 +1,28 @@
+server:
+  listen: ":1935"
+  app: "live"
+
+outputs:
+  youtube:
+    enabled: true
+    url: "rtmp://a.rtmp.youtube.com/live2"
+    key: "${YOUTUBE_STREAM_KEY}"
+    audio_only: false
+
+  facebook:
+    enabled: true
+    url: "rtmps://live-api-s.facebook.com:443/rtmp"
+    key: "${FACEBOOK_STREAM_KEY}"
+    audio_only: false
+
+  mixcloud:
+    enabled: true
+    url: "rtmp://rtmp.mixcloud.com/broadcast"
+    key: "${MIXCLOUD_STREAM_KEY}"
+    audio_only: false
+
+  mixlr:
+    enabled: true
+    url: "rtmp://rtmp.mixlr.com/broadcast"
+    key: "${MIXLR_STREAM_KEY}"
+    audio_only: true

@@ -1,0 +1,36 @@
+server:
+  listen: ":1935"
+  app: "live"
+  stream_key: ""  # Optional: require this key from OBS (leave empty for any)
+  status_port: ":9090"
+
+outputs:
+  youtube:
+    enabled: false
+    url: "rtmp://a.rtmp.youtube.com/live2"
+    key: "${YOUTUBE_STREAM_KEY}"  # Or paste your key directly
+    audio_only: false
+
+  facebook:
+    enabled: false
+    url: "rtmps://live-api-s.facebook.com:443/rtmp/"
+    key: "${FACEBOOK_STREAM_KEY}"
+    audio_only: false
+
+  twitch:
+    enabled: false
+    url: "rtmp://live.twitch.tv/app"
+    key: "${TWITCH_STREAM_KEY}"
+    audio_only: false
+
+  mixcloud:
+    enabled: false
+    url: "rtmp://rtmp.mixcloud.com/broadcast"
+    key: "${MIXCLOUD_STREAM_KEY}"
+    audio_only: false
+
+  mixlr:
+    enabled: false
+    url: "rtmp://rtmp.mixlr.com/broadcast"
+    key: "${MIXLR_STREAM_KEY}"
+    audio_only: true  # Mixlr is audio-only
