@@ -23,12 +23,14 @@ type StatusProvider interface {
 type Server struct {
 	addr     string
 	provider StatusProvider
+	version  string
 }
 
-func NewServer(addr string, provider StatusProvider) *Server {
+func NewServer(addr string, provider StatusProvider, version string) *Server {
 	return &Server{
 		addr:     addr,
 		provider: provider,
+		version:  version,
 	}
 }
 
@@ -116,6 +118,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
+		"version":         s.version,
 		"input_connected": s.provider.IsInputConnected(),
 		"uptime":          uptimeStr,
 		"outputs":         outputs,

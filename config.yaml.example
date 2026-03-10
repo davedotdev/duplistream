@@ -10,27 +10,47 @@ outputs:
     url: "rtmp://a.rtmp.youtube.com/live2"
     key: "${YOUTUBE_STREAM_KEY}"  # Or paste your key directly
     audio_only: false
+    audio_copy: true  # Pass through audio from OBS without re-encoding (recommended)
+    # audio_bitrate: "320k"  # Only used when audio_copy is false
 
   facebook:
     enabled: false
     url: "rtmps://live-api-s.facebook.com:443/rtmp/"
     key: "${FACEBOOK_STREAM_KEY}"
     audio_only: false
+    audio_copy: true
 
   twitch:
     enabled: false
     url: "rtmp://live.twitch.tv/app"
     key: "${TWITCH_STREAM_KEY}"
     audio_only: false
+    audio_copy: true
 
   mixcloud:
     enabled: false
     url: "rtmp://rtmp.mixcloud.com/broadcast"
     key: "${MIXCLOUD_STREAM_KEY}"
     audio_only: false
+    audio_copy: true
 
   mixlr:
     enabled: false
     url: "rtmp://rtmp.mixlr.com/broadcast"
     key: "${MIXLR_STREAM_KEY}"
-    audio_only: true  # Mixlr is audio-only
+    audio_only: true  # Mixlr is audio-only (requires re-encoding)
+    audio_bitrate: "320k"
+
+  instagram:
+    enabled: false
+    url: "rtmps://live-upload.instagram.com:443/rtmp/"
+    key: "${INSTAGRAM_STREAM_KEY}"
+    audio_only: false
+    audio_copy: true
+
+  tiktok:
+    enabled: false
+    url: "${TIKTOK_STREAM_URL}"  # TikTok provides a unique server URL each time
+    key: "${TIKTOK_STREAM_KEY}"
+    audio_only: false
+    audio_copy: true

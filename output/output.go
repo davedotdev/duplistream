@@ -12,12 +12,21 @@ import (
 	"duplistream/stats"
 )
 
+// HeaderProvider provides stream headers for reconnecting outputs
+type HeaderProvider interface {
+	GetStreamHeader() (header []byte, session int)
+}
+
 type Output struct {
-	Name       string
-	URL        string
-	Key        string
-	AudioOnly  bool
+	Name         string
+	URL          string
+	Key          string
+	AudioOnly    bool
 	AudioBitrate string
+	AudioCopy    bool
+
+	headerProvider HeaderProvider
+	lastSession    int
 
 	stats      *stats.Stats
 	cmd        *exec.Cmd
@@ -30,11 +39,13 @@ type Output struct {
 }
 
 type OutputConfig struct {
-	Name         string
-	URL          string
-	Key          string
-	AudioOnly    bool
-	AudioBitrate string
+	Name           string
+	URL            string
+	Key            string
+	AudioOnly      bool
+	AudioBitrate   string
+	AudioCopy      bool
+	HeaderProvider HeaderProvider
 }
 
 func New(cfg OutputConfig) *Output {
@@ -43,12 +54,14 @@ func New(cfg OutputConfig) *Output {
 		bitrate = "256k"
 	}
 	return &Output{
-		Name:         cfg.Name,
-		URL:          cfg.URL,
-		Key:          cfg.Key,
-		AudioOnly:    cfg.AudioOnly,
-		AudioBitrate: bitrate,
-		stats:        stats.New(),
+		Name:           cfg.Name,
+		URL:            cfg.URL,
+		Key:            cfg.Key,
+		AudioOnly:      cfg.AudioOnly,
+		AudioBitrate:   bitrate,
+		AudioCopy:      cfg.AudioCopy,
+		headerProvider: cfg.HeaderProvider,
+		stats:          stats.New(),
 	}
 }
 
@@ -129,13 +142,21 @@ func (o *Output) runOnce(ctx context.Context, inputChan <-chan []byte) error {
 	}
 
 	if o.AudioOnly {
+		// Audio-only output - must re-encode to strip video
 		args = append(args,
 			"-vn",
 			"-c:a", "aac",
 			"-b:a", o.AudioBitrate,
 			"-ar", "44100",
 		)
+	} else if o.AudioCopy {
+		// Pass through both video and audio without re-encoding
+		args = append(args,
+			"-c:v", "copy",
+			"-c:a", "copy",
+		)
 	} else {
+		// Copy video, re-encode audio to AAC
 		args = append(args,
 			"-c:v", "copy",
 			"-c:a", "aac",
@@ -185,6 +206,51 @@ func (o *Output) runOnce(ctx context.Context, inputChan <-chan []byte) error {
 
 	// Parse progress output in background
 	go o.stats.ParseProgress(stderr)
+
+	// Check if we need to write the stream header (reconnecting to an existing stream)
+	// Only write header if:
+	// 1. We have a header provider
+	// 2. We've connected before (lastSession > 0) - meaning this is a reconnect
+	// 3. The stream session matches (we're reconnecting to the same stream)
+	if o.headerProvider != nil && o.lastSession > 0 {
+		header, session := o.headerProvider.GetStreamHeader()
+		if header != nil && session == o.lastSession {
+			// Same stream session - we're reconnecting mid-stream, need header
+			// Drain any stale data from channel first
+			drainCount := 0
+			for {
+				select {
+				case <-inputChan:
+					drainCount++
+				default:
+					goto drained
+				}
+			}
+		drained:
+			if drainCount > 0 {
+				log.Printf("[%s] Drained %d stale packets", o.Name, drainCount)
+			}
+
+			// Write cached header to FFmpeg
+			if _, err := stdin.Write(header); err != nil {
+				cancel()
+				cmd.Wait()
+				return fmt.Errorf("write header: %w", err)
+			}
+			log.Printf("[%s] Wrote stream header (%d bytes)", o.Name, len(header))
+		} else if session != o.lastSession {
+			// Different stream session - new OBS connection, update session
+			// Don't write header - we'll get fresh data with headers from channel
+			o.lastSession = session
+			log.Printf("[%s] New stream session %d", o.Name, session)
+		}
+	}
+
+	// Track the session on first connection
+	if o.headerProvider != nil && o.lastSession == 0 {
+		_, session := o.headerProvider.GetStreamHeader()
+		o.lastSession = session
+	}
 
 	// Write input data to FFmpeg stdin
 	var writeErr error

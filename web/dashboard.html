@@ -127,6 +127,7 @@
         <h1>
             <span class="status-dot" id="main-status"></span>
             Duplistream
+            <span id="version" style="font-size: 0.7rem; color: #666; font-weight: normal;"></span>
         </h1>
 
         <div class="card">
@@ -200,6 +201,11 @@
                 const hasError = Object.values(outputs).some(o => o.error && !o.running);
                 if (data.input_connected && hasError) {
                     mainDot.className = 'status-dot degraded';
+                }
+
+                // Version
+                if (data.version) {
+                    document.getElementById('version').textContent = 'v' + data.version;
                 }
 
                 // Uptime

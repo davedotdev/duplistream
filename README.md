@@ -4,9 +4,11 @@ A lightweight, self-hosted tool that duplicates your stream to multiple platform
 
 Built for DJs, musicians, and streamers who want to go live on multiple platforms without paying for cloud restreaming services.
 
+![Duplistream Web UI](img/web_ui_01.png)
+
 ## Features
 
-- **Multi-platform streaming** - Stream to YouTube, Facebook, Mixcloud, Mixlr, Twitch, and any RTMP destination
+- **Multi-platform streaming** - Stream to YouTube, Facebook, Twitch, Instagram, TikTok, Mixcloud, Mixlr, and any RTMP destination
 - **Output isolation** - Each platform runs in its own process; one failing won't take down the others
 - **Auto-reconnect** - Outputs automatically reconnect with exponential backoff if they drop
 - **Live dashboard** - Web UI showing real-time status of all outputs
@@ -96,18 +98,28 @@ outputs:
     url: "rtmp://a.rtmp.youtube.com/live2"
     key: "your-youtube-stream-key"
     audio_only: false
+    audio_copy: true  # Pass through audio without re-encoding
 
   facebook:
     enabled: true
     url: "rtmps://live-api-s.facebook.com:443/rtmp/"
     key: "your-facebook-stream-key"
     audio_only: false
+    audio_copy: true
 
   mixcloud:
     enabled: true
     url: "rtmp://rtmp.mixcloud.com/broadcast"
     key: "your-mixcloud-stream-key"
     audio_only: false
+    audio_copy: true
+
+  mixlr:
+    enabled: true
+    url: "rtmp://rtmp.mixlr.com/broadcast"
+    key: "your-mixlr-stream-key"
+    audio_only: true       # Audio-only platform
+    audio_bitrate: "320k"  # Re-encode audio (required for audio_only)
 ```
 
 You can also use environment variables:
@@ -130,9 +142,81 @@ key: "${YOUTUBE_STREAM_KEY}"
 4. Set **Stream Key** to anything (or the key from your config if you set one)
 5. Click "Start Streaming"
 
+### Encoder Settings (Important!)
+
+Duplistream passes your video and audio through without re-encoding, so your streaming software must be configured correctly.
+
+#### Recommended Settings
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| **Resolution** | 1280x720 (720p) | Platforms downscale anyway; saves bandwidth |
+| **Frame Rate** | 30 fps | Standard for streaming |
+| **Video Bitrate** | 3500 kbps | Good balance of quality and stability |
+| **Keyframe Interval** | 2 seconds | Required by most platforms |
+| **Audio Bitrate** | 320 kbps | High quality audio for music/DJ streams |
+| **Audio Sample Rate** | 48 kHz | Standard for streaming |
+| **Encoder Preset** | "veryfast" or "faster" | For CPU encoding (x264) |
+
+> **Why these settings?** Platforms like Facebook, YouTube, and Twitch expect 2-second keyframes and will show warnings or degrade quality otherwise. 720p at 3500kbps provides a solid, stable stream that works well across all platforms without overwhelming your upload bandwidth.
+
+#### OBS Studio
+
+**Video Settings** (Settings → Video):
+1. Set **Base (Canvas) Resolution** to `1280x720`
+2. Set **Output (Scaled) Resolution** to `1280x720`
+3. Set **Common FPS Values** to `30`
+
+**Output Settings** (Settings → Output → Advanced → Streaming):
+1. Set **Output Mode** to "Advanced"
+2. Set **Video Bitrate** to `3500` kbps
+3. Set **Keyframe Interval** to `2` seconds
+4. Set **Audio Bitrate** to `320`
+5. If using x264, set **CPU Usage Preset** to "veryfast" or "faster"
+
+#### Streamlabs Desktop
+
+1. Go to **Settings → Video**
+2. Set resolution to `1280x720` and FPS to `30`
+3. Go to **Settings → Output** → "Advanced" mode
+4. Under **Streaming**: Video Bitrate `3500`, Keyframe Interval `2`, Audio Bitrate `320`
+
+#### XSplit Broadcaster
+
+1. Go to **Settings → Output**
+2. Click the gear icon next to your encoder
+3. Set resolution to `1280x720`, 30fps
+4. Set **Bitrate** to `3500` kbps
+5. Set **Key Frame Interval** to `2` seconds
+
+#### FFmpeg (direct)
+
+```bash
+ffmpeg -i <source> \
+  -c:v libx264 -preset veryfast -b:v 3500k \
+  -g 60 -keyint_min 60 \
+  -s 1280x720 -r 30 \
+  -c:a aac -b:a 320k -ar 48000 \
+  -f flv rtmp://your-server:1935/live/key
+```
+
+#### Wirecast
+
+1. Go to **Output Settings**
+2. Set resolution to 1280x720, 30fps
+3. Set **Bitrate** to `3500` kbps
+4. Set **Key Frame Interval** to `2` seconds
+
+#### vMix
+
+1. Go to **Settings → Outputs**
+2. Set resolution to 1280x720, 30fps
+3. Set streaming bitrate to `3500` kbps
+4. Set **Keyframe Frequency** to `2` seconds
+
 ### Dashboard
 
-Open `http://localhost:9090` in your browser to see the live dashboard with status of all outputs.
+Open `http://localhost:9090` in your browser to see the live dashboard with real-time status of all outputs, including frames, bitrate, duration, and data sent. The dashboard auto-refreshes every 2 seconds.
 
 ## Usage
 
@@ -182,21 +266,119 @@ sudo systemctl start duplistream
 sudo systemctl reload duplistream
 ```
 
+## Deployment Options
+
+### Local (Your Laptop/Desktop)
+
+The simplest setup - run Duplistream on the same machine as OBS.
+
+**Pros:**
+- Zero latency between OBS and Duplistream
+- No additional infrastructure needed
+- Easy to set up and debug
+
+**Cons:**
+- Your upload bandwidth must handle ALL outputs simultaneously
+- If your internet drops, all streams die
+- Laptop must stay awake and connected
+
+**Best for:** Testing, small streams, or if you have excellent upload bandwidth (50+ Mbps).
+
+### Dedicated Server (VPS/Cloud)
+
+Run Duplistream on a cloud server (DigitalOcean, Linode, AWS, etc.) and stream from OBS to the server.
+
+**Pros:**
+- Server's upload bandwidth handles fan-out (typically 1+ Gbps)
+- Your home connection only uploads one stream
+- More reliable - server stays online even if your laptop sleeps
+- Can be closer to platform ingest servers (lower latency)
+
+**Cons:**
+- Monthly server cost ($5-20/month for a small VPS)
+- Slight added latency (usually negligible)
+- More complex setup
+
+**Best for:** Multi-platform streaming, unreliable home internet, or professional use.
+
+**Recommended specs:** 1 CPU, 1GB RAM is plenty. Duplistream is lightweight - the bottleneck is bandwidth, not compute.
+
+### Bandwidth Considerations
+
+Duplistream fans out your stream to multiple platforms. Each output consumes the full stream bitrate.
+
+**Bandwidth calculation:**
+```
+Upload needed = (video bitrate + audio bitrate) × number of outputs
+```
+
+**Example with recommended settings (3500kbps video + 320kbps audio):**
+
+| Outputs | Upload Bandwidth Needed |
+|---------|------------------------|
+| 1 | ~4 Mbps |
+| 2 | ~8 Mbps |
+| 3 | ~12 Mbps |
+| 4 | ~16 Mbps |
+| 5 | ~20 Mbps |
+
+**Tips:**
+- Always have 20-30% headroom above your calculated need
+- Test your upload speed at [speedtest.net](https://speedtest.net) before streaming
+- If bandwidth is tight, reduce video bitrate (2500kbps still looks good at 720p)
+- Consider a cloud server if your home upload is under 20 Mbps and you need 3+ outputs
+
+## Platform Compatibility
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| **Mixcloud** | Tested | Works flawlessly |
+| **Facebook** | Tested | Works (may kill feed due to copyright detection) |
+| **Instagram** | Tested | Works |
+| **YouTube** | Untested | Should work - uses standard RTMP |
+| **Twitch** | Untested | Should work - uses standard RTMP |
+| **TikTok** | Untested | Should work - uses standard RTMP |
+| **Mixlr** | Untested | Should work - audio-only platform |
+
 ## Platform-Specific Notes
 
 ### Facebook
 
 After starting your stream, you must manually click "Go Live" in Facebook's Live Producer interface. Facebook holds streams in preview mode until you do this.
 
-### Mixcloud
-
-Mixcloud accepts video streams but only broadcasts audio. No special config needed.
-
 ### YouTube
 
 You may need to enable live streaming on your YouTube account first (can take 24 hours to activate).
 
+### Twitch
+
+Get your stream key from the Twitch Creator Dashboard under Settings → Stream. The key is persistent and doesn't change.
+
+### Instagram
+
+Instagram Live requires a Creator or Business account. Get your stream key from the Instagram app:
+1. Open Instagram → Create Post → Live
+2. Tap the streaming software icon
+3. Copy the Stream URL and Stream Key
+
+Note: Instagram stream keys expire after each session.
+
+### TikTok
+
+TikTok Live requires 1,000+ followers. Get your stream credentials from TikTok Live Studio or the TikTok app:
+1. Open TikTok → Go Live → Cast/Connect
+2. Copy the Server URL and Stream Key
+
+Note: TikTok provides a unique server URL and key for each session - both must be updated before each stream.
+
+### Mixcloud
+
+Mixcloud accepts video streams and broadcasts live, but only records audio. No special config needed.
+
 ## Troubleshooting
+
+**"Key frame rate too low" (Facebook/YouTube warning)**
+Set your keyframe interval to 2 seconds in your streaming software. See [Encoder Settings](#encoder-settings-important) above.
 
 **"no outputs configured"**
 All outputs are either disabled or missing stream keys. Check your config.

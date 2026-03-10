@@ -1,7 +1,15 @@
 #!/bin/bash
 set -e
 
-VERSION=${1:-"dev"}
+# Read version from VERSION file, or use argument, or default to "dev"
+if [ -n "$1" ]; then
+    VERSION="$1"
+elif [ -f "VERSION" ]; then
+    VERSION=$(cat VERSION | tr -d '[:space:]')
+else
+    VERSION="dev"
+fi
+
 OUTPUT_DIR="dist"
 BINARY_NAME="duplistream"
 

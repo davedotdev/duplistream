@@ -20,10 +20,12 @@ type ServerConfig struct {
 }
 
 type OutputConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	URL       string `yaml:"url"`
-	Key       string `yaml:"key"`
-	AudioOnly bool   `yaml:"audio_only"`
+	Enabled      bool   `yaml:"enabled"`
+	URL          string `yaml:"url"`
+	Key          string `yaml:"key"`
+	AudioOnly    bool   `yaml:"audio_only"`
+	AudioBitrate string `yaml:"audio_bitrate"`
+	AudioCopy    bool   `yaml:"audio_copy"` // Pass through audio without re-encoding
 }
 
 func Load(path string) (*Config, error) {

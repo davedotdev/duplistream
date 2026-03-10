@@ -66,7 +66,7 @@ func main() {
 	d.initOutputs()
 
 	// Start web server
-	webServer := web.NewServer(cfg.Server.StatusPort, d)
+	webServer := web.NewServer(cfg.Server.StatusPort, d, Version)
 	go func() {
 		log.Printf("Web dashboard: http://localhost%s", cfg.Server.StatusPort)
 		if err := webServer.Start(); err != nil {
@@ -109,11 +109,13 @@ func (d *Duplistream) initOutputs() {
 		}
 
 		out := output.New(output.OutputConfig{
-			Name:         name,
-			URL:          outCfg.URL,
-			Key:          outCfg.Key,
-			AudioOnly:    outCfg.AudioOnly,
-			AudioBitrate: "256k",
+			Name:           name,
+			URL:            outCfg.URL,
+			Key:            outCfg.Key,
+			AudioOnly:      outCfg.AudioOnly,
+			AudioBitrate:   outCfg.AudioBitrate,
+			AudioCopy:      outCfg.AudioCopy,
+			HeaderProvider: d.inputMgr,
 		})
 		d.outputs[name] = out
 	}
@@ -121,7 +123,7 @@ func (d *Duplistream) initOutputs() {
 
 func (d *Duplistream) printStartupInfo() {
 	log.Printf("==============================================")
-	log.Printf("Duplistream started")
+	log.Printf("Duplistream v%s", Version)
 	log.Printf("==============================================")
 	log.Printf("OBS Settings:")
 	log.Printf("  Server: rtmp://<this-server-ip>%s/%s", d.cfg.Server.Listen, d.cfg.Server.App)
@@ -223,11 +225,13 @@ func (d *Duplistream) reloadConfig() {
 		if !currentNames[name] {
 			log.Printf("[%s] Adding new output", name)
 			out := output.New(output.OutputConfig{
-				Name:         name,
-				URL:          outCfg.URL,
-				Key:          outCfg.Key,
-				AudioOnly:    outCfg.AudioOnly,
-				AudioBitrate: "256k",
+				Name:           name,
+				URL:            outCfg.URL,
+				Key:            outCfg.Key,
+				AudioOnly:      outCfg.AudioOnly,
+				AudioBitrate:   outCfg.AudioBitrate,
+				AudioCopy:      outCfg.AudioCopy,
+				HeaderProvider: d.inputMgr,
 			})
 			d.outputs[name] = out
 

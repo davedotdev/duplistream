@@ -25,6 +25,11 @@ type Manager struct {
 	startTime time.Time
 	outputs   []chan []byte
 	mu        sync.RWMutex
+
+	// Stream header caching for output reconnection
+	streamHeader  []byte
+	streamSession int
+	headerMu      sync.RWMutex
 }
 
 type Config struct {
@@ -58,6 +63,27 @@ func (m *Manager) Uptime() time.Duration {
 		return 0
 	}
 	return time.Since(m.startTime)
+}
+
+// GetStreamHeader returns the cached FLV header and current stream session ID.
+// Outputs use this to get headers when reconnecting mid-stream.
+func (m *Manager) GetStreamHeader() (header []byte, session int) {
+	m.headerMu.RLock()
+	defer m.headerMu.RUnlock()
+	if m.streamHeader == nil {
+		return nil, m.streamSession
+	}
+	// Return a copy to avoid races
+	headerCopy := make([]byte, len(m.streamHeader))
+	copy(headerCopy, m.streamHeader)
+	return headerCopy, m.streamSession
+}
+
+// GetStreamSession returns the current stream session ID
+func (m *Manager) GetStreamSession() int {
+	m.headerMu.RLock()
+	defer m.headerMu.RUnlock()
+	return m.streamSession
 }
 
 // AddOutput registers an output channel to receive input data
@@ -105,7 +131,7 @@ func (m *Manager) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }
@@ -132,20 +158,42 @@ func (m *Manager) runOnce(ctx context.Context) error {
 		"pipe:1",
 	}
 
-	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+	// Retry starting FFmpeg in case the port isn't released yet
+	var cmd *exec.Cmd
+	var stdout, stderr io.ReadCloser
+	var err error
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
+	for attempt := 1; attempt <= 10; attempt++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		cmd = exec.CommandContext(ctx, "ffmpeg", args...)
+
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			return fmt.Errorf("stdout pipe: %w", err)
+		}
+
+		stderr, err = cmd.StderrPipe()
+		if err != nil {
+			return fmt.Errorf("stderr pipe: %w", err)
+		}
+
+		if err = cmd.Start(); err != nil {
+			log.Printf("Failed to start listener (attempt %d/10): %v", attempt, err)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		// Started successfully
+		break
 	}
 
-	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start ffmpeg: %w", err)
+		return fmt.Errorf("start ffmpeg after retries: %w", err)
 	}
 
 	m.mu.Lock()
@@ -182,6 +230,12 @@ func (m *Manager) runOnce(ctx context.Context) error {
 	m.connected = true
 	m.startTime = time.Now()
 	m.mu.Unlock()
+
+	// Increment stream session and clear old header
+	m.headerMu.Lock()
+	m.streamSession++
+	m.streamHeader = nil
+	m.headerMu.Unlock()
 
 	if m.onConnected != nil {
 		m.onConnected()
@@ -257,6 +311,12 @@ func (m *Manager) monitorStderr(r io.Reader, connected chan<- bool, invalidKey c
 func (m *Manager) fanout(ctx context.Context, r io.Reader) error {
 	buf := make([]byte, 32*1024) // 32KB buffer
 
+	// Cache initial data as header for reconnecting outputs
+	// FLV header + metadata + first keyframe is typically under 1MB
+	const maxHeaderSize = 1024 * 1024 // 1MB
+	var headerBuf []byte
+	headerComplete := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -275,6 +335,20 @@ func (m *Manager) fanout(ctx context.Context, r io.Reader) error {
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
+
+			// Cache header data until we have enough
+			if !headerComplete {
+				headerBuf = append(headerBuf, data...)
+				if len(headerBuf) >= maxHeaderSize {
+					headerComplete = true
+					m.headerMu.Lock()
+					m.streamHeader = make([]byte, len(headerBuf))
+					copy(m.streamHeader, headerBuf)
+					m.headerMu.Unlock()
+					headerBuf = nil // Free memory
+					log.Printf("[input] Stream header cached (%d bytes)", len(m.streamHeader))
+				}
+			}
 
 			m.mu.RLock()
 			outputs := make([]chan []byte, len(m.outputs))
